@@ -708,15 +708,51 @@ async function runConvert() {
   }
   shops = [...new Set(shops)].filter(Boolean);
 
-  for (let i=0; i<shops.length; i++) {
-    const pct = Math.round(((i+1)/shops.length)*100);
+  // GAS経由で本物のデータを取得
+  const BATCH = 10;
+  pl.textContent = 'Google APIで店舗情報を取得中...';
+  pf.style.width = '10%';
+
+  for (let b=0; b<shops.length; b+=BATCH) {
+    const batch = shops.slice(b, b+BATCH);
+    const pct = Math.min(Math.round(((b+BATCH)/shops.length)*100), 95);
     pf.style.width = pct + '%';
     pp.textContent = pct + '%';
-    pl.textContent = `[${i+1}/${shops.length}] ${shops[i]} を検索中...`;
-    const d = await fetchPlace(shops[i]);
-    if (!resultsByGenre[d.genre]) resultsByGenre[d.genre] = [];
-    resultsByGenre[d.genre].push(d);
-    await sleep(220);
+    pl.textContent = `[${b+1}〜${Math.min(b+BATCH, shops.length)}/${shops.length}] 検索中...`;
+
+    try {
+      const gasUrl = document.getElementById('gasUrl') ? 
+        document.getElementById('gasUrl').value.trim() : 
+        'https://script.google.com/macros/s/AKfycbzXRYuYDQFvIObk6bn2NNEem6lPK6uGJ_2ee_SbjCJq1XBZYBcYtzlEWa6KSLPQH1Ug/exec';
+      const targetUrl = (gasUrl || 'https://script.google.com/macros/s/AKfycbzXRYuYDQFvIObk6bn2NNEem6lPK6uGJ_2ee_SbjCJq1XBZYBcYtzlEWa6KSLPQH1Ug/exec');
+      const params = encodeURIComponent(JSON.stringify({ action: 'search', shops: batch }));
+      const res = await fetch(targetUrl + '?data=' + params);
+      const text = await res.text();
+      let json;
+      try { json = JSON.parse(text); } catch(e) { json = {}; }
+      
+      if (json && json.status === 'success' && Array.isArray(json.data)) {
+        json.data.forEach(d => {
+          if (!resultsByGenre[d.genre]) resultsByGenre[d.genre] = [];
+          resultsByGenre[d.genre].push(d);
+        });
+      } else {
+        // フォールバック：ダミー
+        batch.forEach(name => {
+          const genres = Object.keys(GENRE_MAP);
+          const d = { name, address: '取得失敗', phone: '-', hp: '-', genre: 'その他', hours: '-', rating: '-' };
+          if (!resultsByGenre[d.genre]) resultsByGenre[d.genre] = [];
+          resultsByGenre[d.genre].push(d);
+        });
+      }
+    } catch(err) {
+      batch.forEach(name => {
+        const d = { name, address: 'エラー:'+err.message, phone: '-', hp: '-', genre: 'その他', hours: '-', rating: '-' };
+        if (!resultsByGenre[d.genre]) resultsByGenre[d.genre] = [];
+        resultsByGenre[d.genre].push(d);
+      });
+    }
+    await sleep(500);
   }
 
   pl.textContent = `✅ ${shops.length}件の処理が完了しました`;
